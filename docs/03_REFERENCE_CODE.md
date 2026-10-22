@@ -1,4 +1,35 @@
-# リファレンス実装コード集（growi-plugin-portal-cards）
+# 実装リファレンス（ページ単位カード）
+
+## 現行実装
+
+対象はGROWI 7.1.9のAPI契約。カテゴリカード内のミニリンクではなく、列挙元のセクション内へ子ページごとのカードを配置する。
+
+- [DSLと設定型](../src/remark-portal-cards.ts): `limit=12`、`excerpt=true`、`excerptLength=120`、`excerptLines=3`が既定。全体設定と行上書きに対応する。
+- [APIと選択処理](../src/growi-pages.ts): 一覧全件の取得、起点除外、ピン優先＋人気順、表示対象の抜粋メタ一括取得、グリッド生存期間のリクエスト共有。
+- [React描画](../src/components/PortalCardsGrid.tsx): パス・標準相当の更新者画像・タイトル・足跡・抜粋。抜粋はテキストで描画し、オフ時は専用領域を作らない。
+- [GROWI登録](../client-entry.tsx): 共有React、View/Preview二重フックを維持。
+- [Sandbox](../dev/sandbox.tsx): MongoId、一覧ページング、添字付きID配列、ID→メタマップのモック。
+- [単体テスト](../test/plugin.spec.ts)、[成果物検証](../scripts/verify-build.mjs)。
+
+```text
+pages/list?path=...&limit=100&page=N
+  -> { pages, totalCount, offset, limit }
+  -> 起点・空ページ・重複・階層を除外、pinsとsortで選択
+page-listing/info?pageIds[0]=...&attachShortBody=true
+  -> { ページID: { isEmpty, sumOfSeenUsers, revisionShortBody, ... } }
+  -> パス・タイトル・画像・足跡・短文のページカード
+```
+
+抜粋オフ時は`attachShortBody`を省く。大きなlimitは20IDずつ、最大2バッチ並列。バッチ失敗・欠落メタ・空本文を区別し、権限のない本文を別APIで補完しない。文字数/行数だけの変更では元抜粋を再整形する。
+
+旧`shortcuts`は非推奨の件数別名。既存Markdownの表示は意図的に変わるため、移行方法とオプションの正本は[README](../README.md)・[現行仕様](01_RESEARCH_REPORT.md)を参照する。コードを二重管理せず、現行の実行可能ソースを正本とする。
+
+## 旧カテゴリカード実装（履歴）
+
+**以下は初期構想の記録であり、現行API・既定値・UIの仕様ではありません。そのままコピーして実装しないでください。** とくに旧`shortcuts=3`、先頭100件のみの取得、存在しないピンの合成、空のdeactivateは現行実装に採用していません。
+
+<details>
+<summary>初期リファレンスコードを表示</summary>
 
 ## 1. `package.json`
 ```json
@@ -957,3 +988,5 @@ if (!manifest['client-entry.tsx']) {
 }
 console.log('✅ ビルド成果物検証OK:', manifest['client-entry.tsx'].file);
 ```
+
+</details>

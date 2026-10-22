@@ -13,7 +13,11 @@ export interface PortalCardConfig {
   color: PortalColorTheme;
   icon: string;
   pins: string[];
+  limit: number;
   shortcuts: number;
+  excerpt: boolean;
+  excerptLength: number;
+  excerptLines: number;
   sort: PortalSortMode;
   recursive: boolean;
   count: boolean;
@@ -42,6 +46,12 @@ const integerOption = (value: string | undefined, fallback: number): number =>
 const booleanOption = (value: string | undefined, fallback: boolean): boolean =>
   value?.toLowerCase() === 'true' ? true : value?.toLowerCase() === 'false' ? false : fallback;
 
+/** 行の無効値は全体設定へ戻し、表示量を安全な範囲に限定します。 */
+const boundedOption = (value: string | undefined, fallback: number, maximum: number): number => {
+  const parsed = integerOption(value, fallback);
+  return parsed >= 1 && parsed <= maximum ? parsed : fallback;
+};
+
 /** 先頭スラッシュと末尾を統一し、カテゴリ境界の比較を安定させます。 */
 export const normalizeGrowiPath = (raw: string): string => {
   const path = `/${raw.trim().replace(/^\/+/, '')}`;
@@ -63,12 +73,19 @@ export const parsePortalCodeBlock = (lang: string, meta: string | null | undefin
     const row = parseKeyValueOptions(rawOptions);
     const options = { ...block, ...row };
     const path = normalizeGrowiPath(rawPath);
+    const limit = integerOption(row.limit, integerOption(row.shortcuts,
+      integerOption(block.limit, integerOption(block.shortcuts, 12))));
     return [{
       path, title: title || path, description,
       color: palette.includes(row.color as PortalColorTheme) ? row.color as PortalColorTheme : palette[index % palette.length],
       icon: row.icon ?? '',
       pins: [...new Set((row.pins ?? '').split(';').filter((pin) => pin.trim()).map(normalizeGrowiPath))],
-      shortcuts: integerOption(row.shortcuts, integerOption(block.shortcuts, 3)),
+      limit,
+      // 旧shortcutsは入力互換の別名とし、新しい表示件数と必ず一致させます。
+      shortcuts: limit,
+      excerpt: booleanOption(row.excerpt, booleanOption(block.excerpt, true)),
+      excerptLength: boundedOption(row.excerptlength, boundedOption(block.excerptlength, 120, 300), 300),
+      excerptLines: boundedOption(row.excerptlines, boundedOption(block.excerptlines, 3, 10), 10),
       sort: sorts.includes(options.sort as PortalSortMode) ? options.sort as PortalSortMode : 'popular',
       recursive: booleanOption(row.recursive, booleanOption(block.recursive, true)),
       count: booleanOption(row.count, booleanOption(block.count, true)),

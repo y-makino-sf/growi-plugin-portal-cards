@@ -6,6 +6,8 @@ export default defineConfig({
   plugins: [react({ jsxRuntime: 'classic' })],
   build: {
     manifest: true,
+    // 匿名画像はSandbox専用で、本番ではGROWI側の同じパスを参照します。
+    copyPublicDir: false,
     outDir: 'dist',
     emptyOutDir: true,
     rollupOptions: { input: 'client-entry.tsx' },
