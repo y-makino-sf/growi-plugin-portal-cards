@@ -44,7 +44,7 @@ describe('GROWI 7.1.9 API契約', () => {
     vi.stubGlobal('fetch', fetchMock);
     const result = await createGrowiPagesClient().load(card('limit=1'), new AbortController().signal);
     expect(result.pages.map((item) => [item.page._id, item.meta?.revisionShortBody])).toEqual([['liked', '手順の抜粋です。']]);
-    expect(result.totalCount).toBe(3);
+    expect(result.displayedCount).toBe(1);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
   it('抜粋オフでは短文取得を省き、オン切替時は別途取得する', async () => {
@@ -61,12 +61,12 @@ describe('GROWI 7.1.9 API契約', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
     client.dispose();
   });
-  it('バッチ403は一覧全消去や次候補の連続取得を起こさない', async () => {
+  it('バッチ403は未確認カードの表示や次候補の連続取得を起こさない', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(response({ pages: fullPages, totalCount: fullPages.length })).mockResolvedValue({ ok: false, status: 403 });
     vi.stubGlobal('fetch', fetchMock);
     const result = await createGrowiPagesClient().load(card('limit=1'), new AbortController().signal);
-    expect(result.pages).toHaveLength(1);
-    expect(result.pages[0].meta).toBeUndefined();
+    expect(result.pages).toHaveLength(0);
+    expect(result.displayedCount).toBe(0);
     expect(result.metaFailed).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -156,7 +156,7 @@ describe('自ページ除外と件数カウント', () => {
   it('自ページ・類似カテゴリ・重複を除外してバッジを表示する', async () => {
     mockApi([...pages, pages[1]]);
     renderCard();
-    expect(await screen.findByText('3件')).toBeInTheDocument();
+    expect(await screen.findByText('表示3件')).toBeInTheDocument();
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/_api/v3/pages/list?path=%2FA'), expect.objectContaining({ credentials: 'same-origin', signal: expect.any(AbortSignal) }));
   });
   it('recursive=falseでは直下だけを数える', () => {
@@ -165,10 +165,12 @@ describe('自ページ除外と件数カウント', () => {
   it('100件以降も取得して人気順と件数に含める', async () => {
     const first = Array.from({ length: 100 }, (_, index) => ({ _id: String(index), path: `/A/Page${index}`, seenUsers: [], liker: [] }));
     const last = { _id: 'last', path: '/A/MostPopular', liker: ['1', '2'], seenUsers: [] };
-    const fetchMock = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => ({ pages: first, totalCount: 101 }) }).mockResolvedValueOnce({ ok: true, json: async () => ({ pages: [last], totalCount: 101 }) });
+    const fetchMock = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => ({ pages: first, totalCount: 101 }) }).mockResolvedValueOnce({ ok: true, json: async () => ({ pages: [last], totalCount: 101 }) })
+      .mockResolvedValue({ ok: true, json: async () => ({ last: { isEmpty: false } }) });
     vi.stubGlobal('fetch', fetchMock);
     renderCard('shortcuts=1');
-    expect(await screen.findByText('101件')).toBeInTheDocument();
+    expect(await screen.findByText('表示1件')).toBeInTheDocument();
+    expect(screen.queryByText('101件')).not.toBeInTheDocument();
     expect(screen.getByText('MostPopular')).toBeInTheDocument();
     expect(fetchMock.mock.calls[1][0]).toContain('page=2');
   });
@@ -325,15 +327,18 @@ describe('ページ本文・足跡・画像の描画', () => {
     expect(excerpt.querySelector('img,script')).toBeNull();
     expect(screen.getByLabelText('閲覧者数 0人')).toBeInTheDocument();
   });
-  it('メタ情報欠落は不明扱いとし、本文と足跡を捏造しない', async () => {
+  it('正常なメタ情報欠落は全候補を調べて非表示にし、取得失敗と混同しない', async () => {
     const fetchMock = vi.fn().mockImplementation(async (raw: string) => ({ ok: true, json: async () => raw.includes('/pages/list?') ? { pages, totalCount: pages.length } : {} }));
     vi.stubGlobal('fetch', fetchMock);
     renderCard('limit=1');
-    expect(await screen.findByRole('link', { name: 'Liked' })).toBeInTheDocument();
+    expect(await screen.findByText('表示できるページがありません')).toBeInTheDocument();
+    expect(screen.getByTestId('portal-card-count')).toHaveTextContent('表示0件');
+    expect(screen.queryByText('/A/Sub/Liked')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Liked' })).not.toBeInTheDocument();
     expect(screen.queryByTestId('portal-card-excerpt')).not.toBeInTheDocument();
     expect(screen.queryByTestId('portal-card-views')).not.toBeInTheDocument();
-    expect(screen.getByRole('status')).toHaveTextContent('一部');
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
   it('空本文をセクション説明で置き換えない', async () => {
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async (raw: string) => ({ ok: true, json: async () => raw.includes('/pages/list?')
@@ -364,7 +369,8 @@ describe('取得件数とリクエスト寿命', () => {
     const many = Array.from({ length: 121 }, (_, index) => ({ _id: String(index), path: `/A/Page${index}`, seenUsers: Array.from({ length: index }, () => 'user'), liker: [] }));
     mockApi(many);
     renderCard();
-    await screen.findByText('121件');
+    await screen.findByText('表示12件');
+    expect(screen.queryByText('121件')).not.toBeInTheDocument();
     expect(screen.getAllByTestId('portal-card-item')).toHaveLength(12);
     const list = screen.getByTestId('portal-cards-grid');
     expect(within(list).getAllByRole('link')[0]).toHaveTextContent('Page120');
@@ -379,11 +385,11 @@ describe('取得件数とリクエスト寿命', () => {
     expect(await screen.findAllByText('本文の抜粋 liked')).toHaveLength(2);
     expect(fetch).toHaveBeenCalledTimes(2);
   });
-  it('limit=0では件数だけ取得しメタAPIを呼ばない', async () => {
+  it('limit=0では件数表示があってもAPIを呼ばない', async () => {
     mockApi();
     renderCard('limit=0');
-    expect(await screen.findByText('3件')).toBeInTheDocument();
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText('表示0件')).toBeInTheDocument();
+    expect(fetch).not.toHaveBeenCalled();
     expect(screen.queryByTestId('portal-card-item')).not.toBeInTheDocument();
   });
   it('明示的な空ページを除き残り候補で補充する', async () => {
@@ -405,5 +411,79 @@ describe('取得件数とリクエスト寿命', () => {
     });
     expect(batches.sort((left, right) => right - left)).toEqual([20, 20, 5]);
     client.dispose();
+  });
+});
+
+// パスとタイトルも表示しないことまで確認し、ピン留めで権限判定を迂回させません。
+describe('参照可能なページだけ表示', () => {
+  it.each(['excerpt=true', 'excerpt=false'])('未確認の最上位ピンを除外して次候補で補充する: %s', async (excerpt) => {
+    const fetchMock = vi.fn().mockImplementation(async (raw: string) => ({ ok: true, json: async () => raw.includes('/pages/list?')
+      ? { pages, totalCount: pages.length }
+      : { viewed: { isEmpty: false, revisionShortBody: '参照可能' }, new: { isEmpty: false, revisionShortBody: '次のページ' } } }));
+    vi.stubGlobal('fetch', fetchMock);
+    renderCard(`limit=2, pins=/A/Sub/Liked, ${excerpt}`);
+    const list = await screen.findByTestId('portal-cards-grid');
+    expect(within(list).getAllByRole('link').map((link) => link.textContent)).toEqual(['Viewed', 'New']);
+    expect(screen.queryByText('/A/Sub/Liked')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Liked' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: 'ピン留め' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('portal-card-count')).toHaveTextContent('表示2件');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+  it('正常応答が全件欠落でも各候補を一度だけ調べて終了する', async () => {
+    const items = Array.from({ length: 25 }, (_, index) => ({ _id: String(index), path: `/A/Hidden${index}`, seenUsers: [], liker: [] }));
+    const fetchMock = vi.fn().mockImplementation(async (raw: string) => ({ ok: true, json: async () => raw.includes('/pages/list?') ? { pages: items, totalCount: items.length } : {} }));
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await createGrowiPagesClient().load(card('limit=12'), new AbortController().signal);
+    expect(result).toEqual({ displayedCount: 0, pages: [], metaFailed: false });
+    const ids = fetchMock.mock.calls.filter(([raw]) => String(raw).includes('/page-listing/info?')).flatMap(([raw]) =>
+      [...new URL(raw, 'https://growi.example').searchParams].filter(([key]) => key.startsWith('pageIds[')).map(([, value]) => value));
+    expect(ids).toHaveLength(25);
+    expect(new Set(ids).size).toBe(25);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+  it('補充中のバッチ失敗でも確認済みカードだけを残す', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => ({ pages, totalCount: pages.length }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ viewed: { isEmpty: false, revisionShortBody: '参照可能' } }) })
+      .mockResolvedValue({ ok: false, status: 503 });
+    vi.stubGlobal('fetch', fetchMock);
+    renderCard('limit=2');
+    expect(await screen.findByRole('link', { name: 'Viewed' })).toBeInTheDocument();
+    expect(screen.getByTestId('portal-card-count')).toHaveTextContent('表示1件');
+    expect(screen.getByRole('status')).toHaveTextContent('取得できません');
+    expect(screen.queryByRole('link', { name: 'Liked' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'New' })).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+  it.each([401, 403, 404, 500])('メタAPI全体のHTTP%sを表示0件と断定しない', async (status) => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => ({ pages, totalCount: pages.length }) }).mockResolvedValue({ ok: false, status });
+    vi.stubGlobal('fetch', fetchMock);
+    renderCard('limit=1');
+    expect(await screen.findByText('取得失敗')).toBeInTheDocument();
+    expect(screen.queryByTestId('portal-card-item')).not.toBeInTheDocument();
+    expect(screen.queryByText('表示0件')).not.toBeInTheDocument();
+    expect(screen.queryByText('表示できるページがありません')).not.toBeInTheDocument();
+    expect(screen.queryByText('/A/Sub/Liked')).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+  it('count=falseでも参照判定と補充は実行する', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (raw: string) => ({ ok: true, json: async () => raw.includes('/pages/list?')
+      ? { pages, totalCount: pages.length } : { viewed: { isEmpty: false } } })));
+    renderCard('limit=1, count=false');
+    expect(await screen.findByRole('link', { name: 'Viewed' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Liked' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('portal-card-count')).not.toBeInTheDocument();
+  });
+  it.each(['network', 'invalid'])('メタ取得の%sでも未確認ページを表示しない', async (failure) => {
+    const fetchMock = vi.fn().mockImplementation(async (raw: string) => {
+      if (raw.includes('/pages/list?')) return { ok: true, json: async () => ({ pages, totalCount: pages.length }) };
+      if (failure === 'network') throw new Error('通信失敗');
+      return { ok: true, json: async () => ({ liked: { isEmpty: false, sumOfSeenUsers: -1 } }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderCard('limit=1');
+    expect(await screen.findByText('取得失敗')).toBeInTheDocument();
+    expect(screen.queryByTestId('portal-card-item')).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

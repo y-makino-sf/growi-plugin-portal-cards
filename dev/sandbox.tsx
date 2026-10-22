@@ -24,6 +24,13 @@ const MOCK_DB: GrowiPageItem[] = [
   { _id: 's1', path: '/Sandbox/EmptyBody', seenUsers: [] },
   { _id: 's2', path: '/Sandbox/BrokenImage', seenUsers: ['1'] },
   { _id: 's3', path: '/Sandbox/MetadataUnavailable', seenUsers: ['1'] },
+  // 一覧には存在しても、閲覧者向けメタAPIからは返らないページを再現します。
+  { _id: 'p1', path: '/AccessCheck/Hidden', seenUsers: ['1', '2', '3', '4', '5'] },
+  { _id: 'p2', path: '/AccessCheck/ReadableA', seenUsers: ['1', '2', '3', '4'] },
+  { _id: 'p3', path: '/AccessCheck/ReadableB', seenUsers: ['1', '2'] },
+  { _id: 'd1', path: '/DeniedOnly/HiddenA', seenUsers: ['1'] },
+  { _id: 'd2', path: '/DeniedOnly/HiddenB', seenUsers: ['1'] },
+  { _id: 'f1', path: '/MetaError/Only', seenUsers: ['1'] },
 ].map((page, index) => ({
   seenUsers: [], liker: [], updatedAt: '2026-10-01', ...page,
   // MongoIdと画像フィールドも実APIに揃え、親なしの開発カテゴリを含めます。
@@ -32,6 +39,8 @@ const MOCK_DB: GrowiPageItem[] = [
 }));
 
 const MOCK_BODIES: Record<string, string> = {
+  '/AccessCheck/ReadableA': '現在の閲覧者が参照できるページです。参照不可のピンを飛ばした後も、このページはカードとして表示されます。',
+  '/AccessCheck/ReadableB': '表示枠に空きがある場合、閲覧可能な次の候補を補充します。バッジは実際に表示するカード数だけを数えます。',
   '/BackOffice/経費精算': '交通費・出張旅費・立替購入の精算手順をまとめています。領収書の添付、勘定科目の選択、申請期限、承認後の振込予定まで確認できます。月末の申請は翌営業日までに提出してください。不備で差し戻された場合は、修正理由をコメントに記載して再申請します。海外出張の換算レートと証憑の保存方法も掲載しています。',
   '/BackOffice/休暇申請': '有給休暇・特別休暇の申請方法です。取得予定日と引継ぎ先を入力し、所属長へ承認を依頼します。半日休暇と時間単位休暇の取り扱い、残日数の確認先、申請後の変更手順もこちらから確認できます。',
   '/BackOffice/年末調整': '年末調整に必要な書類と提出スケジュールを掲載しています。扶養控除、保険料控除、住宅ローン控除の対象となる方は、入力内容と添付書類を確認してください。提出後の修正は担当窓口へご連絡ください。',
@@ -52,7 +61,9 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
   const jsonResponse = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
   if (url.pathname.endsWith('/page-listing/info')) {
     const ids = [...url.searchParams].filter(([key]) => /^pageIds\[\d+\]$/.test(key)).map(([, value]) => value);
-    const items = MOCK_DB.filter((page) => ids.includes(page._id) && !page.path.endsWith('MetadataUnavailable'));
+    const requested = MOCK_DB.filter((page) => ids.includes(page._id));
+    if (requested.some((page) => page.path.startsWith('/MetaError/'))) return jsonResponse({ errors: [{ message: '検証用のメタ取得失敗' }] }, 503);
+    const items = requested.filter((page) => !page.path.endsWith('MetadataUnavailable') && page.path !== '/AccessCheck/Hidden' && !page.path.startsWith('/DeniedOnly/'));
     return jsonResponse(Object.fromEntries(items.map((page) => [page._id, {
       isEmpty: false,
       sumOfSeenUsers: page.seenUsers?.length ?? 0,

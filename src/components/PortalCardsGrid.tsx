@@ -27,9 +27,11 @@ export const createPortalCardsGrid = (React: typeof import('react')) => {
       : <img src={source} alt={`最終更新者: ${username}`} width={32} height={32} className="rounded-circle flex-shrink-0" style={{ objectFit: 'cover' }} onError={() => setFailures((previous) => previous + 1)} />;
   }
 
-  function PageCard({ item, card }: { item: PageCardData; card: PortalCardConfig }): React.ReactElement {
+  function PageCard({ item, card }: { item: PageCardData; card: PortalCardConfig }): React.ReactElement | null {
     const { page, meta } = item;
     const available = meta?.isEmpty === false;
+    // 取得側の判定に加え、描画側でも未確認のパス・タイトルを表示しません。
+    if (!available) return null;
     const seenCount = available ? meta.sumOfSeenUsers ?? (Array.isArray(page.seenUsers) ? page.seenUsers.length : undefined) : undefined;
     const excerpt = card.excerpt && available && typeof meta.revisionShortBody === 'string' ? formatExcerpt(meta.revisionShortBody, card.excerptLength) : '';
     const pinned = card.pins.some((pin) => normalizeGrowiPath(pin) === normalizeGrowiPath(page.path));
@@ -72,14 +74,14 @@ export const createPortalCardsGrid = (React: typeof import('react')) => {
         <h2 className="m-0" style={{ fontSize: '1.125rem', lineHeight: 1.5, overflowWrap: 'anywhere' }}>
           <a href={pathHref(card.path)} className="text-body text-decoration-none">{card.icon && <span aria-hidden="true">{card.icon} </span>}{card.title}</a>
         </h2>
-        {card.count && <span className={`badge bg-${card.color} flex-shrink-0`} data-testid="portal-card-count" title="一覧に含まれる配下ページ数" aria-live="polite">{loading ? '...' : error ? '取得失敗' : `${data?.totalCount ?? 0}件`}</span>}
+        {card.count && <span className={`badge bg-${card.color} flex-shrink-0`} data-testid="portal-card-count" title="参照を確認でき、実際に表示するページ数" aria-live="polite">{loading ? '...' : error || (data?.metaFailed && !data.pages.length) ? '取得失敗' : `表示${data?.displayedCount ?? 0}件`}</span>}
       </div>
       {card.description && <p className="small text-muted mb-2" style={{ overflowWrap: 'anywhere' }}>{card.description}</p>}
       {loading ? <p className="small text-muted" role="status">ページ情報を読込中...</p> : error ? <p className="small text-danger" role="status">一覧を取得できませんでした。件数と順位は未確定です。</p> : <>
         {data?.metaFailed && <p className="small text-muted" role="status">一部のページ情報を取得できませんでした。</p>}
         {data?.pages.length ? <div className={`row row-cols-1${columns} g-3`} data-testid="portal-cards-grid">
           {data.pages.map((item) => <div className="col" key={item.page._id}><PageCard item={item} card={card} /></div>)}
-        </div> : card.limit > 0 && <p className="small text-muted">配下のページはまだありません</p>}
+        </div> : card.limit > 0 && !data?.metaFailed && <p className="small text-muted">表示できるページがありません</p>}
       </>}
     </section>;
   }

@@ -18,9 +18,9 @@ export interface GrowiPageMeta {
 }
 export interface PageCardData {
   page: GrowiPageItem;
-  meta?: GrowiPageMeta;
+  meta: GrowiPageMeta;
 }
-export interface PageSectionData { totalCount: number; pages: PageCardData[]; metaFailed: boolean }
+export interface PageSectionData { displayedCount: number; pages: PageCardData[]; metaFailed: boolean }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -207,7 +207,7 @@ export const createGrowiPagesClient = () => {
   };
   return {
     async load(card: PortalCardConfig, signal: AbortSignal): Promise<PageSectionData> {
-      if (!card.count && card.limit === 0) return { totalCount: 0, pages: [], metaFailed: false };
+      if (card.limit === 0) return { displayedCount: 0, pages: [], metaFailed: false };
       const pages = await shared(`list:${normalizeGrowiPath(card.path)}`, (requestSignal) => fetchSubordinatedPages(card.path, requestSignal), signal);
       const ordered = orderPageCandidates(pages, card);
       const selected: PageCardData[] = [];
@@ -220,19 +220,18 @@ export const createGrowiPagesClient = () => {
           const meta = await getMetadata(batch, card.excerpt, signal);
           for (const page of batch) {
             const info = meta.get(page._id);
-            // 明示的な空ページだけ補充対象にし、欠落IDを権限不足と決めつけません。
-            if (info?.isEmpty === true) continue;
-            if (!info) metaFailed = true;
+            // 正常応答でもIDが欠ける場合は参照を確認できないため、次の候補へ進みます。
+            if (info?.isEmpty !== false) continue;
             selected.push({ page, meta: info });
           }
         } catch {
           if (signal.aborted) throw aborted();
           metaFailed = true;
-          selected.push(...batch.map((page) => ({ page })));
+          // バッチ失敗を権限不足と断定せず、確認済みカードだけ残して補充を止めます。
           break;
         }
       }
-      return { totalCount: ordered.length, pages: selected, metaFailed };
+      return { displayedCount: selected.length, pages: selected, metaFailed };
     },
     dispose() {
       requests.forEach((request) => request.controller.abort());
